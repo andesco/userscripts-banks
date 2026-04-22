@@ -14,6 +14,7 @@ To use [userscripts](https://wikipedia.org/wiki/Userscript), your browser needs 
 
 - [CIBC: Fix Password Autofill](./cibc-password-autofill.user.js): fixes CIBC's two-step sign-in form so password managers can autofill card number and password.
 - [Scotiabank: Reverse Transaction Order](./scotiabank-reverse-transaction-order.user.js): adds a clickable Date column header to toggle transaction sort order.
+- [Venn: Fix OTP Autofill](./venn-fix-otp-autofill.user.js): fixes autofill of 6-digit OTP codes on Venn's MFA page by redistributing codes across Chakra UI's split PinInput fields.
 - [Wealthsimple Tax: Fix Paste](./wealthsimple-tax-fix-paste.user.js): fixes a bug where pasted values are cleared on blur in numeric fields.
 
 ### CIBC: Fix Password Autofill
@@ -38,6 +39,24 @@ Fixes applied:
 Scotiabank displays transactions oldest-first with no way to sort them. The script reverses the list on page load so the newest transactions appear first, and makes the Date column header clickable to toggle sort direction, with a chevron indicating the current order.
 
 The transaction table loads asynchronously. The script detects it via a `MutationObserver` on the `<tbody>` and falls back to polling, then re-applies the header setup whenever the data is replaced (e.g. when switching accounts). Sorting is a pure DOM operation — rows are removed and re-inserted in reverse order — which doesn’t interact with React’s internal state.
+
+### Venn: Fix OTP Autofill
+
+Venn's MFA page uses Chakra UI's `PinInput` component, which renders six separate `<input type="tel" autocomplete="off">` elements — one per digit. Chakra has a built-in paste handler that works correctly when the user manually copies a code and selects "Paste" from the iOS context menu, because that action fires a `ClipboardEvent` that Chakra intercepts.
+
+The failure occurs when the code is delivered via keyboard autofill rather than a paste action. When iOS detects a TOTP code from a registered authenticator app and displays it in the QuickType suggestion bar, tapping the suggestion triggers iOS's internal autofill mechanism, which sets the focused input's value directly and fires an `input` event — not a `ClipboardEvent`. Chakra's paste handler never fires. React's `onChange` fires on `input[data-index="0"]` with the full six-digit code, but Chakra's per-field handler only expects one character; the remaining five inputs stay empty and the form never submits.
+
+The failure may be intermittent because the delivery path varies: long-press → Paste uses a real `ClipboardEvent` and succeeds; tapping the QuickType suggestion may use autofill instead, which would cause the failure described above. `autocomplete="off"` on all six inputs may also contribute — iOS Safari may suppress the QuickType suggestion entirely in some sessions, causing the user to fall back to manual copy-paste where it works.
+
+The fix adds two event interceptors at `document-start`:
+
+1. **Paste interceptor**: captures `paste` events on any `.chakra-pin-input`, prevents Chakra's default handling, and distributes digits across all six fields. Largely redundant with Chakra's built-in behaviour but ensures consistency across password managers that simulate paste differently.
+
+2. **Autofill interceptor**: captures `input` events on `[data-index="0"]`. If the value is six characters and the other five inputs are still empty, it redistributes the code across all fields.
+
+Both use the React native value setter trick to set values in a way React's synthetic event system recognises: calling `Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set` directly (bypassing React's overridden property descriptor) and then dispatching a bubbling `input` event, which causes React to detect the change and call its synthetic `onChange` handler.
+
+See [VENN.md](./VENN.md) for a detailed root cause analysis and a proposed alternative implementation that eliminates the problem entirely — a single `<input autocomplete="one-time-code">` styled with CSS to look like six separate fields.
 
 ### Wealthsimple Tax: Fix Paste
 
