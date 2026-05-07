@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Venn: Fix OTP Autofill
 // @namespace    https://andrewe.ca
-// @version      2.0.0
-// @description  Replaces Venn's split Chakra UI PinInput with a single autocomplete-enabled input styled to look identical.
+// @version      2.1.0
+// @description  Replaces Venn's split Chakra UI PinInput with a single autocomplete-enabled input, eliminating the focus race condition that can prevent reliable iOS autofill.
 // @author       Andrew Escobar (andrewe.ca)
 // @match        https://app.venn.ca/*
 // @match        https://www.venn.ca/*
@@ -12,15 +12,17 @@
 // @downloadURL  https://raw.githubusercontent.com/andesco/userscripts-banks/main/venn-fix-otp-autofill.user.js
 // ==/UserScript==
 
-// Venn's MFA page uses Chakra UI's PinInput component: six separate <input> elements each accepting
-// one digit, all with autocomplete="off". This structure prevents iOS from autofilling the code from
-// an authenticator app — the QuickType suggestion fills only the first input with all six digits,
-// leaving the other five empty and the form stuck.
+// Venn's MFA page uses Chakra UI's PinInput component: six separate <input> elements. Venn has
+// added autocomplete="one-time-code" to each input, which addresses the primary autofill failure.
+// However, a race condition remains possible: Chakra's onChange advances focus to the next input
+// after each digit, which can interfere with iOS distributing digits across all six inputs
+// simultaneously.
 //
-// This script replaces the visual layer with a single <input autocomplete="one-time-code"> styled
-// to look identical to the original six boxes. The six Chakra inputs remain hidden in the DOM so
-// React's state stays intact; when the injected input receives a complete code, each hidden input
-// is filled via React's native value setter so Chakra submits the form normally.
+// This script provides a more robust solution by replacing the visual layer with a single
+// <input autocomplete="one-time-code">. The six Chakra inputs are hidden and explicitly set to
+// autocomplete="off" to prevent any conflict. React's state stays intact — when the injected
+// input receives a complete code, each hidden input is filled via React's native value setter
+// so Chakra submits the form normally.
 
 (() => {
   "use strict";
@@ -56,6 +58,7 @@
 
     // Hide the real Chakra inputs — keep them in the DOM for React
     pinInputs.forEach((input) => {
+      input.autocomplete = "off";
       input.style.cssText = "position:absolute;opacity:0;width:0;height:0;pointer-events:none;";
     });
 
